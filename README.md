@@ -81,8 +81,8 @@ Deploy this project instantly using Portainer's Stack feature with our GitHub re
 
    | Field | Value |
    |-------|-------|
-   | **Repository URL** | `https://github.com/WOOWTECH/Woow_nginxpm_docker_compose_all` |
-   | **Repository reference** | `refs/heads/podman` |
+   | **Repository URL** | `https://github.com/WOOWTECH/Woow_podman_nginxpm` |
+   | **Repository reference** | `refs/heads/main` |
    | **Compose path** | `docker-compose.yml` |
 
 5. Click **Deploy the stack**
@@ -92,7 +92,7 @@ Deploy this project instantly using Portainer's Stack feature with our GitHub re
 1. Copy the raw URL of `docker-compose.yml`:
 
    ```
-   https://raw.githubusercontent.com/WOOWTECH/Woow_nginxpm_docker_compose_all/podman/docker-compose.yml
+   https://raw.githubusercontent.com/WOOWTECH/Woow_podman_nginxpm/podman/docker-compose.yml
    ```
 
 2. Log in to Portainer → **Stacks** → **Add stack** → **Web editor**
@@ -116,8 +116,8 @@ Deploy this project instantly using Portainer's Stack feature with our GitHub re
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/WOOWTECH/Woow_nginxpm_docker_compose_all.git
-   cd Woow_nginxpm_docker_compose_all
+   git clone https://github.com/WOOWTECH/Woow_podman_nginxpm.git
+   cd Woow_podman_nginxpm
    ```
 
 2. **Configure environment variables (optional):**
@@ -296,8 +296,8 @@ NPM **預設使用 SQLite** — 資料庫檔案存放在 `/data` 磁碟區內。
 
    | 欄位 | 值 |
    |------|-----|
-   | **Repository URL** | `https://github.com/WOOWTECH/Woow_nginxpm_docker_compose_all` |
-   | **Repository reference** | `refs/heads/podman` |
+   | **Repository URL** | `https://github.com/WOOWTECH/Woow_podman_nginxpm` |
+   | **Repository reference** | `refs/heads/main` |
    | **Compose path** | `docker-compose.yml` |
 
 5. 點擊 **Deploy the stack**
@@ -307,7 +307,7 @@ NPM **預設使用 SQLite** — 資料庫檔案存放在 `/data` 磁碟區內。
 1. 複製 `docker-compose.yml` 的 Raw URL：
 
    ```
-   https://raw.githubusercontent.com/WOOWTECH/Woow_nginxpm_docker_compose_all/podman/docker-compose.yml
+   https://raw.githubusercontent.com/WOOWTECH/Woow_podman_nginxpm/podman/docker-compose.yml
    ```
 
 2. 登入 Portainer → **Stacks** → **Add stack** → **Web editor**
@@ -331,8 +331,8 @@ NPM **預設使用 SQLite** — 資料庫檔案存放在 `/data` 磁碟區內。
 
 1. **複製儲存庫：**
    ```bash
-   git clone https://github.com/WOOWTECH/Woow_nginxpm_docker_compose_all.git
-   cd Woow_nginxpm_docker_compose_all
+   git clone https://github.com/WOOWTECH/Woow_podman_nginxpm.git
+   cd Woow_podman_nginxpm
    ```
 
 2. **設定環境變數（選擇性）：**
@@ -474,38 +474,16 @@ ports: [80, 443, 81]
 
 ---
 
-## K3s/Kubernetes Deployment
+## Other deployment platforms / 其他部署平台
 
-This project also supports deployment on **K3s/Kubernetes** clusters. The K3s manifests are maintained on a separate branch.
+This repository (`Woow_podman_nginxpm`) hosts the Docker/Podman Compose deployment.
+Nginx Proxy Manager is also available on other platforms — each maintained in its
+own repository:
 
-### Quick Start (K3s)
+本倉庫（`Woow_podman_nginxpm`）提供 Docker/Podman Compose 部署方案。
+Nginx Proxy Manager 亦支援其他平台，各平台維護於獨立倉庫：
 
-```bash
-# Clone the k3s branch
-git clone -b k3s https://github.com/WOOWTECH/Woow_nginxpm_docker_compose_all.git Woow_nginxpm_docker_compose_all-k3s
-cd Woow_nginxpm_docker_compose_all-k3s
-
-# Edit secrets before deploying
-nano secret.yaml
-
-# Deploy to your k3s cluster
-kubectl apply -k .
-
-# Verify pods are running
-kubectl -n nginxpm get pods
-```
-
-### Deployment Methods Comparison
-
-| Feature | Podman/Docker Compose | K3s/Kubernetes |
-|---------|----------------------|----------------|
-| Branch | `main` | `k3s` |
-| Orchestrator | Podman / Docker | K3s / Kubernetes |
-| Config format | `.env` + `docker-compose.yml` | ConfigMap + Secret + YAML manifests |
-| Scaling | Manual | `kubectl scale` |
-| Health checks | Docker healthcheck | liveness/readiness/startup probes |
-| Service discovery | Docker DNS | Kubernetes DNS (`svc.cluster.local`) |
-| Storage | Docker volumes | PersistentVolumeClaims |
-| Rolling updates | `docker compose pull && up -d` | `kubectl rollout restart` |
-
-> For full K3s deployment documentation, switch to the [`k3s` branch](https://github.com/WOOWTECH/Woow_nginxpm_docker_compose_all/tree/k3s).
+| Platform / 平台 | Repository / 倉庫 |
+|---|---|
+| K3s / Kubernetes (Helm chart) | [Woow_k3s_nginxpm](https://github.com/WOOWTECH/Woow_k3s_nginxpm) |
+| Home Assistant add-on | [Woow_ha_nginxpm](https://github.com/WOOWTECH/Woow_ha_nginxpm) |
