@@ -1,0 +1,69 @@
+# Nginx Proxy Manager: rootless Podman, supervised by systemd through Quadlet.
+#
+# scripts/install.sh renders this file (decision D2: the tokens listed in
+# quadlet/render-vars get their values from ~/.config/npm/npm.env) and installs
+# the result to ~/.config/containers/systemd/npm-app.container. Edit the env
+# file, not the installed copy: the next install overwrites local edits (after
+# keeping a backup copy).
+[Unit]
+Description=Nginx Proxy Manager (rootless Podman, Quadlet)
+Documentation=https://github.com/WOOWTECH/Woow_podman_nginxpm
+
+[Container]
+# Kept identical to the compose-era name, so existing hosts adopt in place
+# (scripts/migrate-legacy.sh renames the old container first: Quadlet starts
+# this one with `podman run --replace`, which would delete a same-named one).
+ContainerName=npm-app
+
+# Pinned. Upgrading means bumping this line and running scripts/upgrade.sh.
+# 2.15.1 multi-arch index digest, asserted by tests/smoke.sh:
+#   sha256:52b2c59994f3d36acfcf70a1626f29734df0ed8c71bacc0269f78b6f939858bb
+Image=docker.io/jc21/nginx-proxy-manager:2.15.1
+
+Network=npm.network
+
+# Public entry points. Rootless Podman can bind ports below 1024 only when
+# net.ipv4.ip_unprivileged_port_start <= the lowest port; install.sh checks
+# that and never changes it.
+PublishPort=@@NPM_HTTP_PORT@@:80
+PublishPort=@@NPM_HTTPS_PORT@@:443
+# The admin UI is loopback-only. Reach it with `ssh -L 8181:127.0.0.1:81 <host>`,
+# a tailnet `tailscale serve` forward to 127.0.0.1:81, or an NPM proxy host
+# with an access list.
+PublishPort=127.0.0.1:@@NPM_ADMIN_PORT@@:81
+# More host ports into the same HTTP listener (NPM routes by Host header),
+# one PublishPort line per port in NPM_EXTRA_HTTP_PORTS:
+@@NPM_EXTRA_PUBLISH_LINES@@
+
+# Named volumes with fixed names (VolumeName= in the .volume files), so
+# existing npm-app-data / npm-letsencrypt data is adopted, not recreated.
+Volume=npm-app-data.volume:/data
+Volume=npm-letsencrypt.volume:/etc/letsencrypt
+
+Environment=TZ=@@NPM_TZ@@
+
+# Shipped in the image: curl http://127.0.0.1:81/api/ and expect {"status":"OK"}.
+HealthCmd=/usr/bin/check-health
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=60s
+
+Label=io.woowtech.app=npm
+
+[Service]
+Restart=always
+RestartSec=10
+# A first start on a fresh host pulls the image (about 400 MB); install.sh
+# pulls it beforehand, so this is only a safety margin.
+TimeoutStartSec=900
+TimeoutStopSec=70
+
+[Install]
+WantedBy=default.target
+
+# Optional pi-web front (NPM_PI_WEB_FRONT=true): scripts/render-args.sh puts the
+# contents of quadlet/fragments/pi-web-front.conf here. Podman 4.9 has no
+# .container.d/ drop-ins, but it merges repeated [Unit]/[Container]/[Service]
+# sections, so appended sections add to the ones above.
+@@NPM_PI_WEB_FRONT_FRAGMENT@@
