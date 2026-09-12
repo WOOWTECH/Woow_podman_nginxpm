@@ -11,6 +11,17 @@
 run_variant toypark1234+pi-agent "$REPO/tests/fixtures/toypark1234.env" \
   "$REPO"/quadlet/*.container "$REPO"/quadlet/*.volume "$REPO"/quadlet/*.network "$REPO/tests/fixtures/refs/pi-agent.network"
 
+# Where fixture-toypark1234.env comes from: the derivation in scripts/migrate-legacy.sh, run
+# against a captured `podman inspect npm-app`. Without it nothing ever executes those Go
+# templates and a wrong field name (.HostIp for .HostIP) silently drops a published port.
+echo "== inspect templates"
+if bash "$REPO/tests/inspect-templates.sh"; then
+  echo "ok   inspect-templates"
+else
+  echo "FAIL inspect-templates"
+  failures=$((failures + 1))
+fi
+
 # _npm_gen <variant> <unit>: that unit as the Quadlet generator emits it for the variant
 _npm_gen() {
   QUADLET_UNIT_DIRS="$WORK/$1/out" "${QL_QUADLET_BIN:-/usr/libexec/podman/quadlet}" -dryrun -user 2>/dev/null |

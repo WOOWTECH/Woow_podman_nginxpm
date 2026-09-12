@@ -263,6 +263,8 @@ scripts/
   lib/quadlet-lib.sh       vendored WOOWTECH Quadlet library (do not edit; CI checks its hash)
 tests/
   dryrun.sh dryrun.local.sh   render + quadlet -dryrun + systemd-analyze verify (CI)
+  inspect-templates.sh     what migrate-legacy.sh derives from a captured `podman inspect`
+  gotmpl.py                renders a --format template the way podman's Go templates do
   smoke.sh                 post-install checks on a real host
   pi-web-front.sh          proxy.conf drift gate against an image
   fixtures/                per-host variants, and other apps' units for the dry-run
