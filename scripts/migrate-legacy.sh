@@ -52,7 +52,7 @@ while (($#)); do
     --pi-host) pi_host=${2:?--pi-host needs a hostname}; shift ;;
     --yes) yes=1 ;;
     --dry-run) export QL_DRY_RUN=1 ;;
-    -h | --help) sed -n '2,31p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,32p' "$0"; exit 0 ;;
     *) ql_die "unknown option $1 (see --help)" ;;
   esac
   shift
@@ -290,7 +290,6 @@ ql_info "legacy container kept as $legacy"
 # 6. install; roll back by itself on failure
 if ! bash "$REPO/scripts/install.sh"; then
   ql_warn "install.sh failed; rolling back automatically"
-  yes=1
   rollback
   ql_die "migration failed and was rolled back; details above"
 fi

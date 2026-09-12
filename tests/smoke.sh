@@ -6,7 +6,8 @@
 #   tests/smoke.sh [--pi-host HOST] [--pi-port PORT]
 #
 #   --pi-host HOST  with the pi-web front: send 20 requests with this Host header through
-#                   the HTTP listener and fail on any 502 (default: no sweep)
+#                   the HTTP listener and fail on a 502, on a refused connection, and on
+#                   anything that answers an unauthenticated request (default: no sweep)
 #   --pi-port PORT  port for that sweep (default NPM_HTTP_PORT)
 #
 # With ~/.config/npm/smoke-pi.netrc (0600, operator-created: machine HOST login U password P)
@@ -80,8 +81,17 @@ if [[ $front == true ]]; then
   if ((n >= 2)); then pass "nginx loaded the pi-web Host/Origin rewrite"; else fail "nginx -T shows no woow_upstream_host map"; fi
   if [[ -n $pi_host ]]; then
     port=${pi_port:-$http}
-    codes=$(for _ in $(seq 20); do curl -s -o /dev/null -m 10 -w '%{http_code}\n' -H "Host: $pi_host" "http://127.0.0.1:$port/" 2>/dev/null || echo 000; done | sort | uniq -c | xargs)
-    if [[ $codes == *502* || $codes == *000* ]]; then fail "pi route sweep via :$port: $codes"; else pass "pi route sweep via :$port: $codes"; fi
+    raw=$(for _ in $(seq 20); do curl -s -o /dev/null -m 10 -w '%{http_code}\n' -H "Host: $pi_host" "http://127.0.0.1:$port/" 2>/dev/null || echo 000; done)
+    codes=$(sort <<<"$raw" | uniq -c | xargs)
+    if grep -qxE '502|000' <<<"$raw"; then
+      fail "pi route sweep via :$port: $codes"
+    elif grep -qxE '[23][0-9][0-9]' <<<"$raw"; then
+      # An unauthenticated request must not get through: pi-web's browser terminal is a
+      # shell as this account, so the access list in front of it is the only thing there is.
+      fail "pi route sweep via :$port answered without credentials: $codes (no access list in front of pi-web = an open shell)"
+    else
+      pass "pi route sweep via :$port: $codes"
+    fi
     netrc=$HOME/.config/npm/smoke-pi.netrc
     if [[ -r $netrc ]]; then
       code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' --netrc-file "$netrc" --resolve "$pi_host:$port:127.0.0.1" "http://$pi_host:$port/api/models" 2>/dev/null || echo 000)

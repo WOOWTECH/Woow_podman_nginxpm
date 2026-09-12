@@ -26,7 +26,7 @@ while (($#)); do
     --yes) yes=1 ;;
     --no-safety-backup) safety=0 ;;
     --with-config) config=1 ;;
-    -h | --help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,14p' "$0"; exit 0 ;;
     -*) ql_die "unknown option $1 (see --help)" ;;
     *) [[ -z $dir ]] || ql_die "one directory only"; dir=$1 ;;
   esac

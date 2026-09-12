@@ -103,7 +103,11 @@ done
 
 # ---- 5. host checks: low ports, free ports ---------------------------------------------------
 read -ra extra_ports <<<"$(ql_env_get NPM_EXTRA_HTTP_PORTS '')"
-ports=("$(ql_env_get NPM_HTTP_PORT)" "$(ql_env_get NPM_HTTPS_PORT)" "${extra_ports[@]}")
+# The admin port belongs here too: it is published on 127.0.0.1, but rootless podman still
+# refuses to bind it below ip_unprivileged_port_start. Leaving it out let a host that had
+# moved HTTP/HTTPS to 8080/8443 (which the README recommends when the sysctl cannot be
+# changed) pass this check and then fail with an opaque "npm-app did not become healthy".
+ports=("$(ql_env_get NPM_HTTP_PORT)" "$(ql_env_get NPM_HTTPS_PORT)" "$(ql_env_get NPM_ADMIN_PORT)" "${extra_ports[@]}")
 lowest=$(printf '%s\n' "${ports[@]}" | sort -n | head -n1)
 start=$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start 2>/dev/null || echo 1024)
 if ((lowest < start)); then
@@ -113,7 +117,7 @@ if ((lowest < start)); then
 fi
 if [[ $(podman container inspect --format '{{.State.Running}}' "$NPM_CONTAINER" 2>/dev/null || true) != true ]]; then
   busy=()
-  for p in "${ports[@]}" "$(ql_env_get NPM_ADMIN_PORT)"; do
+  for p in "${ports[@]}"; do
     if ss -tlnH 2>/dev/null | awk '{print $4}' | grep -qE ":$p\$"; then busy+=("$p"); fi
   done
   if ((${#busy[@]})); then
