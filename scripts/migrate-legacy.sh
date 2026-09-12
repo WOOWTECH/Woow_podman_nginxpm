@@ -166,38 +166,15 @@ if [[ $label == "$NPM_UNIT" ]]; then ql_info "npm-app is already managed by $NPM
 
 # 1. read the legacy container
 mapfile -t legacy_units < <({ [[ -n $label ]] && printf '%s\n' "$label"; npm_legacy_units; } | sort -u)
-http='' https='' admin='' extra=() http_ports=()
-while IFS='|' read -r cport hip hport; do
-  [[ -n $hport ]] || continue
-  case $cport in
-    80/tcp) http_ports+=("$hport") ;;
-    443/tcp) [[ -n $https ]] || https=$hport ;;
-    81/tcp) [[ -n $admin ]] || admin=$hport ;;
-    *) ql_warn "legacy publishes $cport on ${hip:-*}:$hport; the unit does not carry that over (add it by hand if needed)" ;;
-  esac
-done < <(podman inspect --format '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{$p}}|{{.HostIp}}|{{.HostPort}}{{println}}{{end}}{{end}}' "$NPM_CONTAINER")
-# The main HTTP port is 80 when 80 is published, else the first one; the rest are extras.
-for p in "${http_ports[@]}"; do [[ $p == 80 ]] && http=80; done
-[[ -n $http || ${#http_ports[@]} == 0 ]] || http=${http_ports[0]}
-for p in "${http_ports[@]}"; do [[ $p == "$http" ]] || extra+=("$p"); done
-[[ -n $http ]] || { ql_warn "legacy npm-app publishes no HTTP port; using 80"; http=80; }
-[[ -n $https ]] || { ql_warn "legacy npm-app publishes no HTTPS port; using 443"; https=443; }
-[[ -n $admin ]] || { ql_warn "legacy npm-app publishes no admin port; using 81 (loopback)"; admin=81; }
-nets=$(podman inspect --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$NPM_CONTAINER")
-tz=$(podman inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$NPM_CONTAINER" | sed -n 's/^TZ=//p' | tail -n1)
+# The derivation and its templates live in common.sh; tests/inspect-templates.sh runs them
+# against a captured `podman inspect npm-app`.
+npm_ports_derive < <(podman inspect --format "$NPM_FMT_PORTS" "$NPM_CONTAINER")
+nets=$(podman inspect --format "$NPM_FMT_NETWORKS" "$NPM_CONTAINER")
+tz=$(podman inspect --format "$NPM_FMT_ENV" "$NPM_CONTAINER" | sed -n 's/^TZ=//p' | tail -n1)
 front=false
 [[ " $nets " == *" pi-agent "* ]] && front=true
 [[ -z $front_flag ]] || front=$front_flag  # --with/--without-pi-web-front wins
-while IFS='|' read -r mtype mname msrc mdst; do
-  case $mdst in
-    /data) [[ $mtype == volume && $mname == npm-app-data ]] || ql_die "legacy /data is '$mtype ${mname:-$msrc}', not the npm-app-data volume; this script adopts npm-app-data only" ;;
-    /etc/letsencrypt) [[ $mtype == volume && $mname == npm-letsencrypt ]] || ql_die "legacy /etc/letsencrypt is '$mtype ${mname:-$msrc}', not the npm-letsencrypt volume" ;;
-    /etc/nginx/conf.d/include/proxy.conf)
-      if [[ $front == true ]]; then ql_info "legacy proxy.conf bind ($msrc) is replaced by the pi-web front's copy"
-      else ql_warn "legacy mounts $msrc over proxy.conf, but the pi-web front is off: that override will be gone"; fi ;;
-    *) ql_warn "legacy mount $mtype ${mname:-$msrc} -> $mdst is not carried over" ;;
-  esac
-done < <(podman inspect --format '{{range .Mounts}}{{.Type}}|{{.Name}}|{{.Source}}|{{.Destination}}{{println}}{{end}}' "$NPM_CONTAINER")
+npm_mounts_check "$front" < <(podman inspect --format "$NPM_FMT_MOUNTS" "$NPM_CONTAINER")
 legacy_image=$(podman inspect --format '{{.ImageName}}' "$NPM_CONTAINER")
 legacy_id=$(podman inspect --format '{{.Image}}' "$NPM_CONTAINER")
 running=$(podman inspect --format '{{.State.Running}}' "$NPM_CONTAINER")
