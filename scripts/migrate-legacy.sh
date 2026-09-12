@@ -15,7 +15,7 @@
 #      keeps your file and only reports the differences). Joined to the pi-agent network
 #      -> NPM_PI_WEB_FRONT=true, unless --with/--without-pi-web-front says otherwise.
 #   3. pull the pinned image, record baseline checks, back up (inspect, CreateCommand,
-#      legacy unit files, compose directory) into ~/backups/npm-migrate-<date>/
+#      legacy unit files, compose directory) into ~/backups/npm-migrate-<timestamp>/
 #   4. stop and disable the legacy unit(s), stop the container, export both volumes cold
 #   5. rename npm-app -> npm-app-legacy-<date>: kept for rollback, never started again
 #   6. scripts/install.sh, then tests/smoke.sh (--pi-host adds the pi route sweep) and a
@@ -252,7 +252,8 @@ else
   ql_warn "$new_image (${new_id:0:12}) differs from the legacy image (${legacy_id:0:12}): NPM may migrate its database on first start; a rollback then needs --restore-volumes"
 fi
 D=$(date +%Y%m%d)
-B=$HOME/backups/npm-migrate-$D
+# One directory per attempt: a retry after a rollback on the same day must not collide.
+B=$HOME/backups/npm-migrate-$(date +%Y%m%d-%H%M%S)
 (umask 077 && mkdir -p "$B")
 if [[ $running == true ]]; then
   # shellcheck disable=SC2068 # the extra ports as separate words
