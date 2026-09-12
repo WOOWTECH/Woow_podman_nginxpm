@@ -38,7 +38,7 @@
   sudo sysctl --system
   ```
 
-  `install.sh` 會檢查並印出上面這兩行；它自己從不使用 `sudo`。不想動 sysctl 的主機可以改用 8080/8443（`NPM_HTTP_PORT`、`NPM_HTTPS_PORT`）。
+  `install.sh` 會檢查並印出上面這兩行；它自己從不使用 `sudo`。不想動 sysctl 的主機可以改用 8080/8443（`NPM_HTTP_PORT`、`NPM_HTTPS_PORT`），此時 `NPM_ADMIN_PORT` 也要一起改：綁在 `127.0.0.1` 並不會讓 81 埠豁免這個 sysctl。
 - lingering，讓 unit 不需登入 session 也能執行：`install.sh` 會啟用；polkit 擋下來時請執行 `sudo loginctl enable-linger <user>`。
 
 ## 安裝
@@ -87,6 +87,14 @@ ssh -L 8181:127.0.0.1:81 <user>@<host>     # 然後開 http://127.0.0.1:8181/
 
 兩個掛載刻意是讀寫：NPM 2.15.1 啟動時會對 `/etc/nginx/conf.d` 跑 `chown -R`，`:ro` 會讓它以 EROFS 失敗。`tests/pi-web-front.sh`（以及 `pi-web-front` workflow）會在新版 NPM 把原廠 `proxy.conf` 改到超出那兩行時讓建置失敗。
 
+這個漂移檢查**不能**證明改寫端到端有效，它只證明我們的檔案仍是「原廠檔案 + 兩行」。真正的證明在主機上：建立 `~/.config/npm/smoke-pi.netrc`（0600，一行 `machine <pi 主機名> login <帳號> password <密碼>`，用 access list 的帳密），然後執行
+
+```bash
+./tests/smoke.sh --pi-host pi.example.com
+```
+
+它會先不帶帳密掃過該路由（每一個回應都必須是驗證挑戰，不可以是 502，也不可以是 200），再帶著帳密要求 `/api/models`，必須回 200；回 403 就代表 Host/Origin 改寫沒有生效。帳密不會被印出來。這個檢查請當成這層 front 任何變更前後的放行判準。
+
 ## 升級
 
 ```bash
@@ -95,6 +103,8 @@ git pull
 ```
 
 拉取新釘選的映像，啟用 front 時先過 `proxy.conf` 檢查，做一次冷備份，安裝並跑 smoke。新版本沒有變 healthy 時，會還原先前的 unit **與兩個 volume**（NPM 的資料庫遷移只能往前），並以先前的映像重啟。
+
+升版本要在同一個 commit 改 `quadlet/npm-app.container` 的**兩行**：`Image=` 與它上面的 `#   sha256:…` index digest — `tests/smoke.sh` 會拿它跟實際執行中的映像核對。忘了改 digest，smoke 就會失敗，升級也會自己回滾。
 
 ## 備份與還原
 
@@ -113,7 +123,7 @@ git pull
 ./scripts/uninstall.sh --purge --yes      # 連 volume 一起刪（刪之前會先匯出）
 ```
 
-`--purge` 永遠不會動 `pi-agent` 網路，那是 pi-agent 套件的東西。
+一般的移除會保留兩個 volume、映像與 `~/.config/npm/npm.env`；本套件裝在 `~/.config/npm/pi-web-front/` 下的檔案會跟著 unit 一起移除，重新安裝時會再寫回來。`--purge` 永遠不會動 `pi-agent` 網路，那是 pi-agent 套件的東西。
 
 ## 從既有的 compose／手動部署遷移
 
@@ -127,6 +137,15 @@ git pull
 ```
 
 它會讀舊容器（連接埠、網路、TZ、volume）與啟動它的 unit，據此寫出 `~/.config/npm/npm.env`，記錄基準檢查，備份（inspect、CreateCommand、unit 檔、compose 目錄），然後在一次短停機內：停止並停用舊 unit、冷匯出兩個 volume、把容器改名為 `npm-app-legacy-<date>`（Quadlet 的 `--replace` 會刪掉同名容器），再執行 `install.sh`。安裝失敗會自動回滾。過程不刪任何東西：觀察期結束後，再自行移除舊容器、舊 unit 檔與舊的 compose 網路。
+
+## 安全性
+
+- **管理介面永遠不會發佈到 LAN 介面。** 它綁在 `127.0.0.1:81`；請用 `ssh -L`、tailnet 的 `tailscale serve --tcp=81`，或一個掛了 access list 的 NPM proxy host 連進去。全新 volume 的預設帳密是 `admin@example.com` / `changeme`，第一次登入就要改掉。
+- **擋在 pi-web 前面的 proxy host 一定要掛 access list。** pi-web 自己沒有任何驗證，而它的瀏覽器終端機等同於跑這些容器的帳號的 shell，所以 access list 是這條路由與那個 shell 之間唯一的東西。對外主機名請再加一層 Cloudflare Access 作為獨立的第二層。上面那個帶帳密的 smoke 檢查，就是用來證明路由仍會要求驗證。
+- **本倉與 unit 檔裡沒有任何機密。** NPM 的管理者帳號、access list、憑證與 JWT 金鑰都在 `npm-app-data` volume 裡，`~/.config/npm/npm.env` 只有連接埠與時區。
+- **備份就是機密**：volume 匯出含有 access list 的密碼雜湊與 JWT 金鑰，它們以 0700 目錄下的 0600 檔案寫出，請維持這個權限。`~/.config/npm/smoke-pi.netrc` 裝的是真實帳密，同理。
+- **rootless，所以容器逃逸落到的是一般帳號**，容器也沒有額外 capability。低位連接埠來自 sysctl，不是 `sudo`，也不是對 podman 執行檔 `setcap`。
+- 映像同時以 tag 與 index digest 釘選，每次（重）啟動後都會驗證。
 
 ## 疑難排解
 

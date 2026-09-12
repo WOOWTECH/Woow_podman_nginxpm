@@ -48,7 +48,8 @@ reboot.
 
   `install.sh` checks this and prints those lines; it never uses `sudo` itself.
   A host that must not change the sysctl can publish 8080/8443 instead
-  (`NPM_HTTP_PORT`, `NPM_HTTPS_PORT`).
+  (`NPM_HTTP_PORT`, `NPM_HTTPS_PORT`) — and must then move `NPM_ADMIN_PORT` too,
+  since being bound to `127.0.0.1` does not exempt port 81 from the sysctl.
 - Lingering, so the units run without a login session: `install.sh` enables it,
   or `sudo loginctl enable-linger <user>` if polkit refuses.
 
@@ -129,6 +130,22 @@ Both mounts are read-write on purpose: NPM 2.15.1 runs `chown -R` over
 `tests/pi-web-front.sh` (and the `pi-web-front` workflow) fail the build if a new
 NPM version changes the stock `proxy.conf` beyond those two lines.
 
+That drift gate does **not** prove the rewrite works end to end — only that our
+version of the file is still the stock one plus two lines. The proof is on the
+host: create `~/.config/npm/smoke-pi.netrc` (mode 0600, one line
+`machine <pi hostname> login <user> password <password>` with the access-list
+credentials) and run
+
+```bash
+./tests/smoke.sh --pi-host pi.example.com
+```
+
+It sweeps the route unauthenticated (every answer must be a challenge, never a
+502 and never a 200) and then asks for `/api/models` with the credentials, which
+must answer 200. A 403 there means the Host/Origin rewrite did not apply.
+Credentials are never printed. Treat that check as the go/no-go before and after
+any change to this front.
+
 ## Upgrade
 
 ```bash
@@ -140,6 +157,11 @@ Pulls the newly pinned image, gates it on the `proxy.conf` check when the front
 is enabled, takes a cold backup, installs and smokes. If the new version does
 not come up healthy it restores the previous units **and both volumes** (NPM's
 database migrations only go forward) and restarts on the previous image.
+
+Bumping a version means editing **two** lines of `quadlet/npm-app.container` in
+the same commit: `Image=` and the `#   sha256:…` index digest above it, which
+`tests/smoke.sh` asserts against the image that is actually running. Leave the
+digest behind and the smoke check fails, and the upgrade rolls itself back.
 
 ## Backup and restore
 
@@ -160,8 +182,10 @@ the access-list password hashes and the JWT keys; treat them as secrets.
 ./scripts/uninstall.sh --purge --yes      # also deletes the volumes, after a final export
 ```
 
-`--purge` never touches the `pi-agent` network, which belongs to the pi-agent
-package.
+Both volumes, the image and `~/.config/npm/npm.env` survive a plain uninstall;
+the files this package installed under `~/.config/npm/pi-web-front/` are removed
+with the units, and a re-install writes them again. `--purge` never touches the
+`pi-agent` network, which belongs to the pi-agent package.
 
 ## Migrating an existing compose or manual deployment
 
@@ -183,6 +207,30 @@ cold, renames the container to `npm-app-legacy-<date>` (Quadlet would delete a
 same-named container with `--replace`) and runs `install.sh`. A failed install
 rolls back automatically. Nothing is deleted: after the soak period, remove the
 legacy container, its unit file and the old compose network by hand.
+
+## Security
+
+- **The admin UI is never published on a LAN interface.** It is bound to
+  `127.0.0.1:81`; reach it with `ssh -L`, a tailnet `tailscale serve --tcp=81`,
+  or an NPM proxy host with an access list. On a fresh volume it starts as
+  `admin@example.com` / `changeme` — change it on the first login.
+- **A proxy host in front of pi-web needs an access list.** pi-web ships no
+  authentication and its browser terminal is a shell as the account that runs
+  the containers, so the access list is the only thing between the route and
+  that shell. For a public hostname, put Cloudflare Access in front as a second,
+  independent layer. The authenticated smoke check above is how you prove the
+  route still challenges.
+- **Nothing secret lives in this repository or in a unit file.** NPM keeps its
+  admin users, access lists, certificates and JWT keys inside the `npm-app-data`
+  volume, and `~/.config/npm/npm.env` holds only ports and a timezone.
+- **Backups are secrets**: the volume exports carry the access-list password
+  hashes and the JWT keys. They are written 0600 in a 0700 directory; keep them
+  that way. So is `~/.config/npm/smoke-pi.netrc`, which holds real credentials.
+- **Rootless, so a container escape lands on an unprivileged account**, and the
+  container gets no added capabilities. Low ports come from the sysctl, never
+  from `sudo` or `setcap` on a podman binary.
+- The image is pinned by tag **and** by index digest, both asserted after every
+  (re)start.
 
 ## Troubleshooting
 
