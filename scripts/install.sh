@@ -117,8 +117,12 @@ if ((lowest < start)); then
 fi
 if [[ $(podman container inspect --format '{{.State.Running}}' "$NPM_CONTAINER" 2>/dev/null || true) != true ]]; then
   busy=()
+  # Read the listener list once, then match it. NOT `ss | awk | grep -q`: grep -q exits at the
+  # first match, awk is then killed by SIGPIPE and pipefail makes that the pipeline's status,
+  # so a busy port would be reported free. Latent only while ss fits the 64 KiB pipe buffer.
+  listeners=$(ss -tlnH 2>/dev/null | awk '{print $4}' || true)
   for p in "${ports[@]}"; do
-    if ss -tlnH 2>/dev/null | awk '{print $4}' | grep -qE ":$p\$"; then busy+=("$p"); fi
+    if grep -qE ":$p\$" <<<"$listeners"; then busy+=("$p"); fi
   done
   if ((${#busy[@]})); then
     busy_re=$(IFS='|'; printf '%s' "${busy[*]}")
