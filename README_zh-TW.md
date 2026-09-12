@@ -178,6 +178,8 @@ scripts/
   lib/quadlet-lib.sh       vendored 的 WOOWTECH Quadlet 函式庫（不要改；CI 會檢查雜湊）
 tests/
   dryrun.sh dryrun.local.sh   渲染 + quadlet -dryrun + systemd-analyze verify（CI）
+  inspect-templates.sh     migrate-legacy.sh 從擷取下來的 `podman inspect` 推導出什麼
+  gotmpl.py                以 podman Go template 的規則算出 --format 的輸出
   smoke.sh                 真實主機上的安裝後檢查
   pi-web-front.sh          對映像比對 proxy.conf 是否漂移
   fixtures/                各主機的設定變體，以及 dry-run 需要的其他套件 unit
