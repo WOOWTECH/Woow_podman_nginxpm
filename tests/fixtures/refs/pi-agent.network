@@ -1,0 +1,14 @@
+# Private bridge for the stack. netavark's aardvark-dns resolves container names
+# on it. A same-host reverse proxy joins this network to reach "pi-web:30141" by
+# name: Woow_podman_nginxpm does so when installed with NPM_PI_WEB_FRONT=true.
+# The network carries no data; it is only a name that both packages agree on.
+#
+# A plain network, not a pod: podman 4.9 has no .pod Quadlet type.
+[Unit]
+Description=pi-agent private network
+
+[Network]
+NetworkName=pi-agent
+
+[Install]
+WantedBy=default.target

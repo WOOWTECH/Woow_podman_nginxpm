@@ -1,0 +1,10 @@
+# Let's Encrypt account and certificates issued by NPM.
+[Unit]
+Description=Nginx Proxy Manager certificates
+
+[Volume]
+VolumeName=npm-letsencrypt
+Label=io.woowtech.app=npm
+
+[Install]
+WantedBy=default.target

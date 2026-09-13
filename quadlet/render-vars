@@ -1,0 +1,11 @@
+# Variables scripts/install.sh may substitute for @@NAME@@ in quadlet/*
+# (decision D2). Anything not listed here is a hard error.
+#
+# From ~/.config/npm/npm.env (config/npm.env.example):
+NPM_TZ
+NPM_HTTP_PORT
+NPM_HTTPS_PORT
+NPM_ADMIN_PORT
+# Computed by scripts/render-args.sh:
+NPM_EXTRA_PUBLISH_LINES
+NPM_PI_WEB_FRONT_FRAGMENT

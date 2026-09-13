@@ -1,0 +1,13 @@
+# NPM configuration, proxy hosts, access lists (hashed credentials), JWT keys
+# and the SQLite database. Losing it loses every proxy host and access list.
+[Unit]
+Description=Nginx Proxy Manager data
+
+[Volume]
+# Without VolumeName= Quadlet would create "systemd-npm-app-data" and ignore
+# the existing volume. The label only applies to a volume created fresh.
+VolumeName=npm-app-data
+Label=io.woowtech.app=npm
+
+[Install]
+WantedBy=default.target

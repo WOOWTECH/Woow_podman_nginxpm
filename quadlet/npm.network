@@ -1,0 +1,15 @@
+# NPM's own bridge. Upstreams that are other containers are reached by joining
+# their network as well and forwarding to the container name (see
+# fragments/pi-web-front.conf). A service published only on host loopback
+# (127.0.0.1:PORT) is NOT reachable from a rootless bridge; forward to its
+# container name on a shared network instead.
+[Unit]
+Description=Nginx Proxy Manager network
+
+[Network]
+# Same name the openclaw deployment already uses, so that host can adopt it.
+NetworkName=npm-network
+Label=io.woowtech.app=npm
+
+[Install]
+WantedBy=default.target

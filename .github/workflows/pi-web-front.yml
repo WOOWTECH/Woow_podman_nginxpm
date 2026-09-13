@@ -1,0 +1,37 @@
+# pi-web front gate: our config/pi-web-front/proxy.conf replaces the stock
+# /etc/nginx/conf.d/include/proxy.conf of the pinned NPM image. Fail when the pinned image's
+# copy differs from ours by more than the Host/Origin lines, so an NPM version bump cannot
+# silently mask an upstream change. Pulls the image (about 400 MB) and runs it once with
+# `cat`: no ports, no volumes, no network.
+name: pi-web-front
+
+on:
+  push:
+    branches: [main]
+    paths: ['quadlet/npm-app.container', 'config/pi-web-front/**', 'tests/pi-web-front.sh', '.github/workflows/pi-web-front.yml']
+  pull_request:
+    paths: ['quadlet/npm-app.container', 'config/pi-web-front/**', 'tests/pi-web-front.sh', '.github/workflows/pi-web-front.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  proxy-conf:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+          podman --version
+
+      - name: Pull the pinned image
+        run: |
+          image=$(sed -n 's/^Image=//p' quadlet/npm-app.container | tail -n1)
+          for i in 1 2 3; do podman pull "$image" && break; sleep 10; done
+          podman image exists "$image"
+
+      - name: proxy.conf differs only in the Host/Origin lines
+        run: tests/pi-web-front.sh

@@ -1,12 +1,6 @@
 # Environment files with secrets / 含有機密資訊的環境變數檔案
 .env
 
-# PostgreSQL data / PostgreSQL 資料目錄
-data/
-
-# Let's Encrypt certificates (if using bind mount) / SSL 憑證目錄
-letsencrypt/
-
 # Planning files / 規劃用檔案
 task_plan.md
 findings.md
@@ -21,3 +15,6 @@ progress.md
 # OS / 作業系統暫存檔
 .DS_Store
 Thumbs.db
+
+# Python bytecode (tests/gotmpl.py) / Python 位元組碼
+__pycache__/

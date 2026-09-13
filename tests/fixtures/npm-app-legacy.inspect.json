@@ -1,0 +1,165 @@
+[
+  {
+    "Id": "6f0f6d7a1c2b4e8d9a0b1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f607",
+    "Created": "2024-03-19T21:14:08.471820295+08:00",
+    "Path": "/init",
+    "Args": [],
+    "State": {
+      "OciVersion": "1.1.0",
+      "Status": "running",
+      "Running": true,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 21437,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-08-30T03:11:52.014882118+08:00",
+      "FinishedAt": "0001-01-01T00:00:00Z",
+      "Health": {
+        "Status": "healthy",
+        "FailingStreak": 0,
+        "Log": []
+      }
+    },
+    "Image": "3a4f7b9c1d2e3f405162738495a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e",
+    "ImageName": "docker.io/jc21/nginx-proxy-manager:2.11.3",
+    "Name": "npm-app",
+    "RestartCount": 0,
+    "Driver": "overlay",
+    "Mounts": [
+      {
+        "Type": "volume",
+        "Name": "npm-app-data",
+        "Source": "/home/woowtech/.local/share/containers/storage/volumes/npm-app-data/_data",
+        "Destination": "/data",
+        "Driver": "local",
+        "Mode": "",
+        "Options": ["nosuid", "nodev", "rbind"],
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "volume",
+        "Name": "npm-letsencrypt",
+        "Source": "/home/woowtech/.local/share/containers/storage/volumes/npm-letsencrypt/_data",
+        "Destination": "/etc/letsencrypt",
+        "Driver": "local",
+        "Mode": "",
+        "Options": ["nosuid", "nodev", "rbind"],
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Name": "",
+        "Source": "/home/woowtech/npm/pi-web-front/proxy.conf",
+        "Destination": "/etc/nginx/conf.d/include/proxy.conf",
+        "Driver": "",
+        "Mode": "",
+        "Options": ["nosuid", "nodev", "rbind"],
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Name": "",
+        "Source": "/etc/localtime",
+        "Destination": "/etc/localtime",
+        "Driver": "",
+        "Mode": "",
+        "Options": ["nosuid", "nodev", "rbind"],
+        "RW": false,
+        "Propagation": "rprivate"
+      }
+    ],
+    "Config": {
+      "Hostname": "npm-app",
+      "Env": [
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "TZ=Asia/Taipei",
+        "PUID=1000",
+        "PGID=1000",
+        "container=podman"
+      ],
+      "Labels": {
+        "com.docker.compose.project": "npm",
+        "com.docker.compose.project.working_dir": "/home/woowtech/npm",
+        "com.docker.compose.service": "npm-app",
+        "io.podman.compose.project": "npm"
+      },
+      "StopTimeout": 10,
+      "CreateCommand": [
+        "podman-compose",
+        "up",
+        "-d"
+      ]
+    },
+    "HostConfig": {
+      "NetworkMode": "bridge",
+      "PortBindings": {
+        "80/tcp": [
+          { "HostIp": "", "HostPort": "80" },
+          { "HostIp": "", "HostPort": "30142" }
+        ],
+        "443/tcp": [
+          { "HostIp": "", "HostPort": "443" }
+        ],
+        "81/tcp": [
+          { "HostIp": "127.0.0.1", "HostPort": "81" }
+        ]
+      },
+      "RestartPolicy": {
+        "Name": "always",
+        "MaximumRetryCount": 0
+      },
+      "ReadonlyRootfs": false,
+      "PidsLimit": 2048,
+      "Memory": 0,
+      "NanoCpus": 0
+    },
+    "NetworkSettings": {
+      "Ports": {
+        "80/tcp": [
+          { "HostIp": "", "HostPort": "80" },
+          { "HostIp": "", "HostPort": "30142" }
+        ],
+        "443/tcp": [
+          { "HostIp": "", "HostPort": "443" }
+        ],
+        "81/tcp": [
+          { "HostIp": "127.0.0.1", "HostPort": "81" }
+        ]
+      },
+      "SandboxID": "",
+      "IPAddress": "",
+      "Networks": {
+        "npm_default": {
+          "EndpointID": "",
+          "Gateway": "10.89.3.1",
+          "IPAddress": "10.89.3.9",
+          "IPPrefixLen": 24,
+          "MacAddress": "6a:1f:00:11:22:33",
+          "NetworkID": "npm_default",
+          "DriverOpts": null,
+          "IPAMConfig": null,
+          "Links": null,
+          "Aliases": ["npm-app"]
+        },
+        "pi-agent": {
+          "EndpointID": "",
+          "Gateway": "10.89.7.1",
+          "IPAddress": "10.89.7.4",
+          "IPPrefixLen": 24,
+          "MacAddress": "6a:1f:00:44:55:66",
+          "NetworkID": "pi-agent",
+          "DriverOpts": null,
+          "IPAMConfig": null,
+          "Links": null,
+          "Aliases": ["npm-app"]
+        }
+      }
+    }
+  }
+]
