@@ -182,6 +182,24 @@ t_migrate_legacy_asks_the_host_instead_of_warning_and_renaming_anyway() {
   return 0
 }
 
+t_the_capture_path_works_with_an_empty_suffix() {
+  # npm-app is retired with an empty suffix on the capture path (nothing is renamed there)
+  # A capture-path cutover renames nothing, so it has no <name>-legacy-<suffix> to name and
+  # passes an empty suffix. `${2:?}` would abort the script there; `${2-}` must not.
+  enable_restart_unit
+  mk_legacy npm-app always
+  expect_ok npm_legacy_capture "$T/bk" npm-app
+  expect_ok npm_legacy_retire capture "" "$T/bk" npm-app
+  podman container exists npm-app && die_t "npm-app was not removed"
+  expect_ok npm_legacy_restore "" "$T/bk" npm-app
+  has "$OUT" "recreated npm-app"
+  eq "$(ql_container_restart_policy npm-app)" always "the original restart policy comes back"
+  # and with no capture either, the refusal names only what could exist
+  expect_fail npm_legacy_restore "" "$T/empty" npm-app
+  hasnt "$OUT" "-legacy- " "an empty suffix must not be spelled into the message"
+  return 0
+}
+
 run() {
   local t=$1 log rc
   [[ -z $FILTER || $t == *"$FILTER"* ]] || return 0
