@@ -1,0 +1,27 @@
+[Unit]
+Description=Rootless Nginx Proxy Manager (owned secure deployment)
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+UMask=0077
+ExecStart="@REPO_ROOT@/scripts/deploy.sh"
+# The timer has no dependency back to this unit, so this synchronous post-start
+# gate cannot form an ordering cycle. A timer start failure fails this start.
+ExecStartPost=/usr/bin/systemctl --user start nginx-proxy-manager-healthcheck.timer
+# Stop the scheduler before removing the scoped stack. Missing or already
+# inactive health units must not fail the main service's stop.
+ExecStop=-/usr/bin/systemctl --user stop nginx-proxy-manager-healthcheck.timer nginx-proxy-manager-healthcheck.service
+ExecStop="@REPO_ROOT@/scripts/remove.sh"
+# Covers deploy plus the nested verification readiness budgets and image pull.
+TimeoutStartSec=900
+TimeoutStopSec=180
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Drive the rootless Nginx Proxy Manager container healthcheck
+BindsTo=nginx-proxy-manager.service
+After=nginx-proxy-manager.service
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart="@REPO_ROOT@/scripts/healthcheck.sh"
+TimeoutStartSec=30
