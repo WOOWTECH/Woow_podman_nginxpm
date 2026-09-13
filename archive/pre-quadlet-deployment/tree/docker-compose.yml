@@ -1,0 +1,52 @@
+services:
+  app:
+    image: "${NPM_IMAGE}"
+    container_name: npm-app
+    labels:
+      io.woow.nginxpm.managed: "true"
+      io.woow.nginxpm.owner: "${NPM_OWNER_ID}"
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+      - "127.0.0.1:18081:81"
+    environment:
+      TZ: "${TZ}"
+    volumes:
+      - npm-app-data:/data
+      - npm-letsencrypt:/etc/letsencrypt
+    networks:
+      - npm-network
+      - odoo18-network
+      - pi-agent
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/bin/check-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+networks:
+  npm-network:
+    name: npm-network
+    labels:
+      io.woow.nginxpm.managed: "true"
+      io.woow.nginxpm.owner: "${NPM_OWNER_ID}"
+  odoo18-network:
+    name: odoo18-network
+    external: true
+  pi-agent:
+    name: pi-agent
+    external: true
+
+volumes:
+  npm-app-data:
+    name: npm-app-data
+    labels:
+      io.woow.nginxpm.managed: "true"
+      io.woow.nginxpm.owner: "${NPM_OWNER_ID}"
+  npm-letsencrypt:
+    name: npm-letsencrypt
+    labels:
+      io.woow.nginxpm.managed: "true"
+      io.woow.nginxpm.owner: "${NPM_OWNER_ID}"

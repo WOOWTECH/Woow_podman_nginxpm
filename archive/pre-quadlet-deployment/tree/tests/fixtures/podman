@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -u
+state=${PODMAN_FIXTURE_STATE:?}
+cmd=${1:-}; shift || true
+type=container
+case $cmd in
+  info) echo true; exit 0;;
+  version) echo 4.9.3; exit 0;;
+  inspect) [[ ${1:-} == --type ]] && { type=$2; shift 2; };;
+  network|volume) type=$cmd; [[ ${1:-} == inspect ]] && shift;;
+  *) echo "unsupported fake podman invocation: $cmd $*" >&2; exit 3;;
+esac
+[[ ${1:-} == --format ]] || exit 3
+format=$2; shift 2; name=${1:-}
+line=$(awk -v t="$type" -v n="$name" '$1==t && $2==n {print; exit}' "$state")
+if [[ -z $line ]]; then echo "Error: no such $type $name" >&2; exit 125; fi
+read -r _ _ managed owner running health mountpoint <<<"$line"
+case $format in
+  '{{.Name}}') echo "$name";;
+  *io.woow.nginxpm.managed*) echo "$managed";;
+  *io.woow.nginxpm.owner*) echo "$owner";;
+  '{{.State.Running}}') echo "${running:-false}";;
+  '{{.State.Health.Status}}') echo "${health:-unhealthy}";;
+  '{{.Mountpoint}}') echo "${mountpoint:-/tmp/fake}";;
+  *) exit 3;;
+esac

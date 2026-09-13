@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+set -u
+state=${FAKE_RUNTIME_STATE:?}; resources=$state/resources; events=$state/events
+mkdir -p "$state"; touch "$resources" "$events"
+printf 'podman %s\n' "$*" >>"$events"
+fail_once() {
+  [[ ${FAKE_FAIL_ONCE:-} == "$1" && ! -e $state/failed.$1 ]] || return 1
+  : >"$state/failed.$1"; printf 'injected failure: %s\n' "$1" >&2; return 0
+}
+record_lifecycle_fd() {
+  local operation=$1 status=closed
+  [[ ! -e /proc/$$/fd/9 ]] || status=open
+  printf 'lifecycle-fd9 %s %s\n' "$status" "$operation" >>"$events"
+  [[ ${FAKE_REQUIRE_LIFECYCLE_FD_CLOSED:-0} != 1 || $status == closed ]]
+}
+lookup() { awk -v t="$1" -v n="$2" '$1==t && $2==n {print; exit}' "$resources"; }
+set_running() {
+  awk -v n="$1" -v value="$2" 'BEGIN{OFS=" "} $1=="container"&&$2==n {$5=value} {print}' "$resources" >"$resources.tmp" && mv "$resources.tmp" "$resources"
+}
+set_health() {
+  awk -v n="$1" -v value="$2" 'BEGIN{OFS=" "} $1=="container"&&$2==n {$6=value} {print}' "$resources" >"$resources.tmp" && mv "$resources.tmp" "$resources"
+}
+cmd=${1:-}; shift || true
+type=container
+case $cmd in
+  info) [[ ${1:-} == --format ]] && echo true; exit 0;;
+  version) echo 4.9.3; exit 0;;
+  inspect) [[ ${1:-} == --type ]] && { type=$2; shift 2; };;
+  network|volume)
+    type=$cmd
+    sub=${1:-}; shift || true
+    if [[ $sub == rm && $type == volume ]]; then
+      name=${1:-}; fail_once "volume-rm-$name" && exit 42
+      awk -v n="$name" '!($1=="volume"&&$2==n)' "$resources" >"$resources.tmp" && mv "$resources.tmp" "$resources"; exit 0
+    fi
+    [[ $sub == inspect ]] || exit 3;;
+  start)
+    record_lifecycle_fd podman-start || exit 97
+    name=${1:-}; fail_once start && exit 42
+    if [[ ${FAKE_ROLLBACK_FAILURE:-} == restart && -e $state/failed.main-restore-extract ]]; then
+      deletes=$(grep -c 'podman unshare sh -c find.*-delete' "$events" 2>/dev/null || true)
+      if ((deletes >= 4)) && [[ ! -e $state/failed.rollback-restart ]]; then
+        : >"$state/failed.rollback-restart"; printf 'injected rollback restart failure\n' >&2; exit 42
+      fi
+    fi
+    [[ -n $(lookup container "$name") ]] || exit 125
+    set_running "$name" true; exit 0;;
+  stop)
+    name=${1:-}; fail_once stop && exit 42
+    [[ -n $(lookup container "$name") ]] || exit 125
+    set_running "$name" false; exit 0;;
+  rm)
+    [[ ${1:-} == -f ]] && shift
+    name=${1:-}
+    if [[ $name == npm-bootstrap ]]; then fail_once bootstrap-rm && exit 42; fi
+    [[ -n $(lookup container "$name") ]] || exit 125
+    awk -v n="$name" '!($1=="container"&&$2==n)' "$resources" >"$resources.tmp" && mv "$resources.tmp" "$resources"; exit 0;;
+  run)
+    record_lifecycle_fd podman-run || exit 97
+    fail_once bootstrap-run && exit 42
+    args=" $* "; env_file=''
+    while (($#)); do
+      case $1 in
+        --env-file) env_file=$2; shift 2;;
+        --name|--label|--network|--publish|--volume) shift 2;;
+        --log-driver=*|--restart=*|--pull=*) shift;;
+        -d) shift;;
+        *) image=$1; shift;;
+      esac
+    done
+    pin='docker.io/jc21/nginx-proxy-manager:2.15.1@sha256:52b2c59994f3d36acfcf70a1626f29734df0ed8c71bacc0269f78b6f939858bb'
+    [[ $args == *' --name npm-bootstrap '* && $args == *' --label io.woow.nginxpm.managed=true '* && $args == *' --label io.woow.nginxpm.owner='* && $args == *' --log-driver=none '* && $args == *' --restart=no '* && $args == *' --network npm-network '* && $args == *' --publish 127.0.0.1:18081:81 '* && $args == *' --volume npm-app-data:/data '* && $args == *' --volume npm-letsencrypt:/etc/letsencrypt '* && $image == "$pin" ]] || exit 44
+    [[ -f $env_file && ! -L $env_file && $(stat -c %a "$env_file") == 600 ]] || exit 45
+    email=$(awk -F= '$1=="INITIAL_ADMIN_EMAIL"{print substr($0,index($0,"=")+1)}' "$env_file")
+    password=$(awk -F= '$1=="INITIAL_ADMIN_PASSWORD"{print substr($0,index($0,"=")+1)}' "$env_file")
+    [[ -n $email && -n $password && $args != *"$email"* && $args != *"$password"* ]] || exit 46
+    owner=$(cat "$state/../repo/.state/owner-id" 2>/dev/null || awk '$1=="network"&&$2=="npm-network"{print $4}' "$resources")
+    printf 'container npm-bootstrap true %s true healthy x\n' "$owner" >>"$resources"
+    python3 - "$state/api.json" "$email" "$password" <<'PY'
+import json,sys
+with open(sys.argv[1],'w') as f: json.dump({'email':sys.argv[2],'password':sys.argv[3]},f)
+PY
+    printf 'bootstrap-validated\n' >>"$events"
+    echo fixture-bootstrap-id; exit 0;;
+  logs) cat "$state/container.log" 2>/dev/null || true; exit 0;;
+  healthcheck)
+    [[ ${1:-} == run ]] || exit 3
+    name=${2:-}; [[ -n $(lookup container "$name") ]] || exit 125
+    [[ ${FAKE_HEALTHCHECK_FAIL:-0} != 1 ]] || { set_health "$name" unhealthy; exit 1; }
+    [[ ${FAKE_HEALTHCHECK_STALE:-0} == 1 ]] || set_health "$name" healthy
+    printf 'healthy\n'; exit 0;;
+  unshare)
+    fail_once unshare && exit 42
+    if [[ $* == *check_empty_db.py* ]]; then
+      python3 - "$state/api.json" <<'PY'
+import json,sys
+v=json.load(open(sys.argv[1]))
+raise SystemExit(0 if v.get('email') is None and v.get('password') is None else 1)
+PY
+      exit $?
+    fi
+    if [[ -n ${FAKE_ROLLBACK_FAILURE:-} ]]; then
+      if [[ $* == *"-C $state/data --numeric-owner -xf -"* && ! -e $state/failed.main-restore-extract ]]; then
+        : >"$state/failed.main-restore-extract"; printf 'injected main restore extraction failure\n' >&2; exit 42
+      fi
+      if [[ $FAKE_ROLLBACK_FAILURE == delete && -e $state/failed.main-restore-extract && $* == *'find "$1" -mindepth 1 -delete'* && ! -e $state/failed.rollback-delete ]]; then
+        : >"$state/failed.rollback-delete"; printf 'injected rollback delete failure\n' >&2; exit 42
+      fi
+      if [[ $FAKE_ROLLBACK_FAILURE == extract && $* == *restore-rollback* && $* == *' -xf '* && ! -e $state/failed.rollback-extract ]]; then
+        : >"$state/failed.rollback-extract"; printf 'injected rollback extraction failure\n' >&2; exit 42
+      fi
+    fi
+    exec "$@";;
+  *) echo "unsupported fake podman invocation: $cmd $*" >&2; exit 3;;
+esac
+[[ ${1:-} == --format ]] || exit 3
+format=$2; shift 2; name=${1:-}
+line=$(lookup "$type" "$name")
+if [[ -z $line ]]; then echo "Error: no such $type $name" >&2; exit 125; fi
+read -r _ _ managed owner running health mountpoint <<<"$line"
+case $format in
+  '{{.Name}}') echo "$name";;
+  *io.woow.nginxpm.managed*) echo "$managed";;
+  *io.woow.nginxpm.owner*) echo "$owner";;
+  '{{.State.Running}}') echo "${running:-false}";;
+  '{{.State.Health.Status}}') echo "${health:-unhealthy}";;
+  '{{.Mountpoint}}') echo "$mountpoint";;
+  '{{json .Config.Env}}')
+    if [[ ${FAKE_STEADY_BOOTSTRAP_ENV:-0} == 1 ]]; then printf '%s\n' '["TZ=Asia/Taipei","INITIAL_ADMIN_EMAIL=operator@example.com"]'
+    else printf '%s\n' '["TZ=Asia/Taipei"]'; fi;;
+  '{{json .HostConfig.PortBindings}}') printf '%s\n' '{"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"80"}],"443/tcp":[{"HostIp":"0.0.0.0","HostPort":"443"}],"81/tcp":[{"HostIp":"127.0.0.1","HostPort":"18081"}]}' ;;
+  '{{range .Mounts}}{{println .Name "|" .Destination}}{{end}}')
+    if [[ ${FAKE_WRONG_MOUNTS:-0} == 1 ]]; then printf 'npm-app-data | /wrong\nnpm-letsencrypt | /etc/letsencrypt\n'
+    else printf 'npm-app-data | /data\nnpm-letsencrypt | /etc/letsencrypt\n'; fi;;
+  *) echo "unsupported inspect format: $format" >&2; exit 3;;
+esac
