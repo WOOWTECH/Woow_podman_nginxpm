@@ -82,7 +82,7 @@ front=$(ql_env_get NPM_PI_WEB_FRONT false)
 
 # ---- 4. render and validate ------------------------------------------------------------------
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/$APP-install.XXXXXX")
-trap 'rm -rf "$WORK"' EXIT
+ql_cleanup work rm -rf "$WORK"
 mkdir -p "$WORK/src" "$WORK/out"
 cp -p "$REPO"/quadlet/*.container "$REPO"/quadlet/*.volume "$REPO"/quadlet/*.network "$WORK/src/"
 RENDER_ARGS=()
