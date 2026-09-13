@@ -203,10 +203,46 @@ It reads the legacy container (ports, networks, TZ, volumes) and the units that
 start it, writes `~/.config/npm/npm.env` from that, records baseline checks,
 backs up (inspect, CreateCommand, unit files, compose directory), then in one
 short downtime: stops and disables the legacy unit(s), exports both volumes
-cold, renames the container to `npm-app-legacy-<date>` (Quadlet would delete a
-same-named container with `--replace`) and runs `install.sh`. A failed install
-rolls back automatically. Nothing is deleted: after the soak period, remove the
-legacy container, its unit file and the old compose network by hand.
+cold, retires the container (Quadlet would delete a same-named one with
+`--replace`) and runs `install.sh`. A failed install rolls back automatically.
+Nothing of the legacy deployment is deleted beyond what the rollback shape below
+requires: after the soak period, remove what is left, the unit file and the old
+compose network by hand.
+
+### How npm-app is kept for rollback
+
+Renaming `npm-app` and leaving it stopped is a rollback path only while nothing
+starts it again. The user unit `podman-restart.service` runs
+`podman start --all --filter restart-policy=always` at boot, so on a host where
+that unit is **enabled** a renamed, stopped container whose restart policy is
+exactly `always` revives at the next boot and fights the new Quadlet container
+for ports 80/443 and both volumes. podman 4.9.3 cannot repair that afterwards:
+`podman update` only rewrites cgroup limits, and a restart policy is fixed at
+create time.
+
+The script therefore asks `ql_rollback_strategy` — which reads this host's real
+state, never its name — and takes one of two paths. `--dry-run` prints which one
+applies here.
+
+| Answer | When | What the cutover does | What `--rollback` does |
+|---|---|---|---|
+| `rename` | the unit is disabled, or `npm-app`'s policy is not `always` | `podman rename npm-app npm-app-legacy-<date>`, left stopped | renames it back |
+| `capture` | the unit is enabled **and** `npm-app`'s policy is `always` | writes `<backup>/legacy-container/npm-app/` (inspect, create command, image, policy, mounts, networks, published ports) and then a plain `podman rm` — never `podman rm -v`, which would delete the anonymous volumes | `ql_recreate_container` recreates it stopped, with its original restart policy |
+
+`npm-app` is `unless-stopped` on both WOOWTECH hosts, so in practice both take
+the `rename` path. What changed is that the script no longer merely *warns* when
+`podman-restart.service` is enabled and then renames anyway — that warning fired
+even for an `unless-stopped` container the unit never touches, and stayed a
+warning in the one case where renaming really is unsafe.
+
+The capture cannot bring back the container's **writable layer** — anything
+written inside it that did not land in a volume or a bind mount. NPM keeps its
+admin users, access lists, certificates and JWT keys in `npm-app-data` and
+`npm-app-letsencrypt`, and the live container's writable layer holds only about
+57 kB of runtime scratch under `/run` and `/var`, so nothing of value is lost.
+(`ql_capture_container --commit` exists for a stack that mutates its own
+container; NPM does not need it.) The container id and the IP/MAC lease are not
+preserved either. `tests/rollback-model.sh` pins both paths.
 
 ## Security
 

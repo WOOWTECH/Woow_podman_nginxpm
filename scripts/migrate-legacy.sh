@@ -17,15 +17,27 @@
 #   3. pull the pinned image, record baseline checks, back up (inspect, CreateCommand,
 #      legacy unit files, compose directory) into ~/backups/npm-migrate-<timestamp>/
 #   4. stop and disable the legacy unit(s), stop the container, export both volumes cold
-#   5. rename npm-app -> npm-app-legacy-<date>: kept for rollback, never started again
+#   5. retire npm-app: renamed to npm-app-legacy-<date> and left stopped, or - where
+#      podman-restart.service would revive it at boot - captured into the backup directory
+#      and removed. See "Rollback shape" below; --dry-run reports which path applies.
 #   6. scripts/install.sh, then tests/smoke.sh (--pi-host adds the pi route sweep) and a
 #      diff against the baseline. A failed install rolls back by itself.
 #
-# --rollback         stop and remove the Quadlet units (volumes kept), rename the legacy
-#                    container back, re-enable and start its unit(s)
+# --rollback         stop and remove the Quadlet units (volumes kept), bring the legacy
+#                    container back (renamed, or recreated from the capture), re-enable and
+#                    start its unit(s)
 # --restore-volumes  with --rollback: also re-import the exports from step 4 (needed only
 #                    if the new NPM version migrated the database)
 # --status           show what a migration on this host left behind
+#
+# Rollback shape (STANDARD 7a): renaming npm-app and leaving it stopped only keeps a
+# rollback while nothing starts it again. The user unit podman-restart.service runs
+# `podman start --all --filter restart-policy=always` at boot, so where it is enabled AND
+# npm-app's restart policy is exactly `always`, a renamed copy revives and fights the new
+# Quadlet container for ports 80/443 and both volumes. podman 4.9.3 cannot change a restart
+# policy afterwards, so the script then captures npm-app and removes it, and --rollback
+# recreates it with ql_recreate_container. ql_rollback_strategy asks this host's real state,
+# never its name.
 #
 # State: ~/.local/state/woow-quadlet/npm-migrate/state. Nothing is ever deleted: removing
 # npm-app-legacy-<date>, the old unit file and the compose network is a manual step after
@@ -52,7 +64,7 @@ while (($#)); do
     --pi-host) pi_host=${2:?--pi-host needs a hostname}; shift ;;
     --yes) yes=1 ;;
     --dry-run) export QL_DRY_RUN=1 ;;
-    -h | --help) sed -n '2,32p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,44p' "$0"; exit 0 ;;
     *) ql_die "unknown option $1 (see --help)" ;;
   esac
   shift
@@ -92,18 +104,26 @@ status() {
 }
 
 rollback() {
-  local legacy units bdir v t mp
+  local legacy units bdir v t mp sfx captured=''
   legacy=$(state_get LEGACY_NAME)
   units=$(state_get LEGACY_UNITS)
   bdir=$(state_get BACKUP_DIR)
-  if [[ -z $legacy ]]; then
+  [[ -n $bdir ]] && captured=$bdir/legacy-container/$NPM_CONTAINER/meta
+  if [[ -z $legacy && ! -f ${captured:-/nonexistent} ]]; then
+    # no state and no capture: fall back to the one renamed container on the host
     mapfile -t cands < <(podman ps -a --format '{{.Names}}' 2>/dev/null | grep -E '^npm-app-legacy-' || true)
     ((${#cands[@]} == 1)) || ql_die "no migration state and ${#cands[@]} npm-app-legacy-* containers; roll back by hand"
     legacy=${cands[0]}
   fi
-  podman container exists "$legacy" >/dev/null 2>&1 || ql_die "legacy container $legacy does not exist"
-  ql_warn "rolling back: $NPM_UNIT out, $legacy back as npm-app${units:+ (units: $units)}"
-  if dry; then ql_info "[dry-run] would stop $NPM_UNIT, uninstall the Quadlet files, rename $legacy npm-app, start ${units:-the container}"; return 0; fi
+  sfx=${legacy#npm-app-legacy-}
+  if [[ -n $legacy ]]; then
+    podman container exists "$legacy" >/dev/null 2>&1 || ql_die "legacy container $legacy does not exist"
+    ql_warn "rolling back: $NPM_UNIT out, $legacy back as npm-app${units:+ (units: $units)}"
+  else
+    [[ -f $captured ]] || ql_die "neither a renamed legacy container nor a capture in ${bdir:-?}; roll back by hand"
+    ql_warn "rolling back: $NPM_UNIT out, npm-app recreated from ${captured%/meta}${units:+ (units: $units)}"
+  fi
+  if dry; then ql_info "[dry-run] would stop $NPM_UNIT, uninstall the Quadlet files, bring npm-app back, start ${units:-the container}"; return 0; fi
   systemctl --user stop "$NPM_UNIT" 2>/dev/null || true
   QL_APP=$NPM_APP ql_uninstall_units "$NPM_APP"
   if podman container exists "$NPM_CONTAINER" >/dev/null 2>&1; then
@@ -124,7 +144,8 @@ rollback() {
       ql_info "re-imported $v from ${t##*/}"
     done
   fi
-  podman rename "$legacy" "$NPM_CONTAINER"
+  # renamed back, or recreated from the capture the cutover took - whichever the host needed
+  npm_legacy_restore "$sfx" "${bdir:-/nonexistent}" "$NPM_CONTAINER"
   if [[ -n $units ]]; then
     for u in $units; do systemctl --user enable "$u" >/dev/null 2>&1 || ql_warn "could not enable $u"; done
     # shellcheck disable=SC2086 # a space-separated list of unit names
@@ -190,20 +211,30 @@ legacy npm-app: image $legacy_image (${legacy_id:0:12}), running=$running
   TZ:        ${tz:-unset (Asia/Taipei)}
   compose:   ${workdir:-none}
 EOF
-if [[ $(systemctl --user is-enabled podman-restart.service 2>/dev/null || true) == enabled ]]; then
-  ql_warn "podman-restart.service is enabled: it starts containers with restart policy 'always' at boot."
-  ql_warn "npm-app-legacy-<date> has policy '$(podman inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$NPM_CONTAINER")'; remove it after the soak."
-fi
+# How npm-app is kept for --rollback: renamed and left stopped, or captured and removed.
+# Asked of this host, never of its name (STANDARD 7a, quadlet-lib >= 1.4.0). The old warning
+# here fired on any enabled podman-restart.service, including for an `unless-stopped`
+# container that unit never touches, and it went on to rename regardless - which is exactly
+# the unsafe case when the policy really is `always`.
+STRATEGY=$(ql_rollback_strategy "$NPM_CONTAINER")
 
 # 2. settings
 declare -A want=([NPM_TZ]=${tz:-Asia/Taipei} [NPM_HTTP_PORT]=$http [NPM_HTTPS_PORT]=$https [NPM_ADMIN_PORT]=$admin [NPM_EXTRA_HTTP_PORTS]="${extra[*]}" [NPM_PI_WEB_FRONT]=$front)
 if dry; then
   ql_info "[dry-run] ~/.config/npm/npm.env would get:"
   for k in NPM_TZ NPM_HTTP_PORT NPM_HTTPS_PORT NPM_ADMIN_PORT NPM_EXTRA_HTTP_PORTS NPM_PI_WEB_FRONT; do printf '    %s=%s\n' "$k" "${want[$k]}" >&2; done
-  ql_info "[dry-run] would pull $new_image, back up, stop ${legacy_units[*]:-npm-app}, rename npm-app, run scripts/install.sh"
+  if [[ $STRATEGY == capture ]]; then
+    ql_info "[dry-run] would pull $new_image, back up, stop ${legacy_units[*]:-npm-app}, capture npm-app into the backup directory and remove it (podman-restart.service would revive a renamed copy here), run scripts/install.sh"
+  else
+    ql_info "[dry-run] would pull $new_image, back up, stop ${legacy_units[*]:-npm-app}, rename npm-app, run scripts/install.sh"
+  fi
   exit 0
 fi
-confirm "Back up, stop ${legacy_units[*]:-npm-app}, rename npm-app to npm-app-legacy-$(date +%Y%m%d) and install the Quadlet unit (about 1 minute of NPM downtime)?"
+if [[ $STRATEGY == capture ]]; then
+  confirm "Back up, stop ${legacy_units[*]:-npm-app}, capture npm-app into the backup directory and remove it (podman-restart.service is enabled here, so a renamed copy would revive at boot), and install the Quadlet unit (about 1 minute of NPM downtime)?"
+else
+  confirm "Back up, stop ${legacy_units[*]:-npm-app}, rename npm-app to npm-app-legacy-$(date +%Y%m%d) and install the Quadlet unit (about 1 minute of NPM downtime)?"
+fi
 ql_env_ensure "$REPO/config/npm.env.example" "$NPM_ENV_FILE"
 if ((keep_env)); then
   ql_info "--keep-env: $NPM_ENV_FILE is used as it is; differences from the legacy container:"
@@ -247,6 +278,9 @@ fi
   done
   if [[ -n $workdir && -d $workdir ]]; then tar -czf "$B/compose-dir.tgz" -C "$(dirname -- "$workdir")" -- "$(basename -- "$workdir")"; fi
 )
+# On the capture path the rollback copy is written now, while npm-app still serves: a
+# container whose create command cannot be replayed is refused before any downtime.
+if [[ $STRATEGY == capture ]]; then npm_legacy_capture "$B" "$NPM_CONTAINER"; fi
 
 # 4. downtime starts
 ql_info "stopping the legacy npm-app"
@@ -256,13 +290,20 @@ podman stop -t 30 "$NPM_CONTAINER" >/dev/null 2>&1 || true
 for v in "${NPM_VOLUMES[@]}"; do ql_backup_volume "$v" "$B" >/dev/null; done
 for u in "${legacy_units[@]}"; do systemctl --user disable "$u" >/dev/null 2>&1 || ql_warn "could not disable $u"; done
 # 5. keep the legacy container for rollback
-legacy=npm-app-legacy-$D
-i=2
-while podman container exists "$legacy" >/dev/null 2>&1; do legacy=npm-app-legacy-$D-$i; i=$((i + 1)); done
-podman rename "$NPM_CONTAINER" "$legacy"
+legacy=''
+if [[ $STRATEGY == rename ]]; then
+  legacy=npm-app-legacy-$D
+  i=2
+  while podman container exists "$legacy" >/dev/null 2>&1; do legacy=npm-app-legacy-$D-$i; i=$((i + 1)); done
+fi
+npm_legacy_retire "$STRATEGY" "${legacy#npm-app-legacy-}" "$B" "$NPM_CONTAINER"
 state_write "PHASE=switched" "DATE=$D" "LEGACY_NAME=$legacy" "LEGACY_UNITS=${legacy_units[*]}" "BACKUP_DIR=$B" \
-  "HTTP_PORT=$http" "ADMIN_PORT=$admin" "EXTRA_PORTS=${extra[*]}"
-ql_info "legacy container kept as $legacy"
+  "STRATEGY=$STRATEGY" "HTTP_PORT=$http" "ADMIN_PORT=$admin" "EXTRA_PORTS=${extra[*]}"
+if [[ $STRATEGY == capture ]]; then
+  ql_info "legacy container captured into $B/legacy-container/$NPM_CONTAINER and removed"
+else
+  ql_info "legacy container kept as $legacy"
+fi
 
 # 6. install; roll back by itself on failure
 if ! bash "$REPO/scripts/install.sh"; then
