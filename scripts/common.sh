@@ -15,17 +15,147 @@ NPM_VOLUMES=(npm-app-data npm-letsencrypt)
 
 # npm_legacy_units: user units in ~/.config/systemd/user that start or stop a container
 # named npm-app (the compose-era container-npm-app.service, a generate-systemd unit, ...).
+#
+# The container name is anchored on whitespace-or-end, not on `\b`. A word boundary sits
+# between "npm-app" and the "-" of "npm-app-legacy-20260915", so `\bnpm-app\b` matched the
+# RENAMED rollback copy (and any other npm-app-* container) as well - see tests/host-tree.sh,
+# which pins both the positive and the negative case.
+#
+# The argument between the verb and the name is OPTIONAL. An earlier anchoring wrote
+# `...(start|stop|run|restart)[[:space:]].*[[:space:]]npm-app(...)`, whose `.*[[:space:]]`
+# demanded a SECOND whitespace run after the verb - so the canonical
+# `ExecStart=/usr/bin/podman start npm-app` was NOT discovered, while
+# `ExecStop=/usr/bin/podman stop -t 10 npm-app` was. An undiscovered unit is never stopped
+# and never `systemctl --user disable`d by migrate-legacy.sh, and on a host where
+# podman-restart.service is enabled (woowtechopenclaw) it revives npm-app at the next boot
+# against the Quadlet-managed container. tests/host-tree.sh now pins one case per Exec form.
 npm_legacy_units() {
   local d=$HOME/.config/systemd/user f
   [[ -d $d ]] || return 0
+  # the name, optionally quoted, anchored on whitespace-or-end
+  local q='["'"'"']?'
+  local n="${q}npm-app${q}([[:space:]]|\$)"
+  local ex='^[[:space:]]*Exec(Start|StartPre|StartPost|Stop|StopPost|Reload)='
   for f in "$d"/*.service; do
     [[ -f $f ]] || continue
     [[ ${f##*/} == "$NPM_UNIT" ]] && continue
-    if grep -qE '^[[:space:]]*Exec(Start|StartPre|Stop)=.*[[:space:]](start|stop|run|restart)[[:space:]].*\bnpm-app\b' "$f" \
-      || grep -qE '^[[:space:]]*Exec(Start|Stop)=.*[[:space:]]--name[= ]npm-app\b' "$f"; then
+    if grep -qE "$ex.*[[:space:]](start|stop|run|restart|kill|rm|create)[[:space:]]+(.*[[:space:]])?$n" "$f" \
+      || grep -qE "$ex.*[[:space:]]--name[= ]$n" "$f"; then
       printf '%s\n' "${f##*/}"
     fi
   done
+}
+
+# ---- the host-tree guard -------------------------------------------------------------------
+# This package adopts two shapes of legacy npm-app: the compose-era one (a podman-compose
+# project, with com.docker.compose.* labels) and a hand-made `podman run`. woowtechopenclaw
+# has neither. There, npm-app is started by `nginx-proxy-manager.service`, whose ExecStart is
+# `%h/Woow_podman_nginxpm/scripts/deploy.sh` in a hand-copied, non-git tree of a DIFFERENT
+# lineage; the literal string "npm-app" never appears in the unit, and the container carries
+# no PODMAN_SYSTEMD_UNIT label because podman-compose made it. Both discovery paths therefore
+# came up empty, the banner said "units: (none; started by hand)", and the migration ran to
+# completion WITHOUT stopping or disabling that unit or its healthcheck timer - so the next
+# boot (or the next timer tick) re-ran deploy.sh and recreated npm-app against the Quadlet
+# container's ports 80/443 and both volumes. That is what this guard refuses.
+#
+# The second half of the same mismatch is the third network: openclaw's npm-app is on
+# npm-network + odoo18-network + pi-agent, and the unit carries only npm.network (+ pi-agent
+# via the fragment). `nets` was read but never acted on, so after the cutover NPM lost DNS for
+# odoo18-web:8069 - silently, because nginx resolves upstreams at config load.
+
+# NPM_OWN_NETWORKS: the networks the Quadlet unit reproduces. npm-network comes from
+# quadlet/npm.network (NetworkName=), pi-agent from quadlet/fragments/pi-web-front.conf.
+# shellcheck disable=SC2034
+NPM_OWN_NETWORKS='npm-network pi-agent'
+
+# npm_exec_paths <unit file>: the program of every Exec*= line, one per line, with systemd's
+# `-@+!:` prefixes stripped and %h expanded. A unit that runs a shell wrapper is named by
+# that wrapper, which is exactly what locates the tree it lives in.
+npm_exec_paths() {
+  local line p
+  while IFS= read -r line; do
+    p=${line%%[[:space:]]*}
+    # systemd allows any number of "-@+!:" before the program; strip them one at a time
+    # rather than with a pattern, because "-" and ":" also occur inside real paths.
+    while [[ $p == [-@+!:]* ]]; do p=${p#?}; done
+    p=${p//%h/$HOME}
+    if [[ $p == /* ]]; then printf '%s\n' "$p"; fi
+  done < <(sed -n 's/^[[:space:]]*Exec[A-Za-z]*=//p' "$1")
+  return 0
+}
+
+# npm_deploy_tree <path>: the nearest ancestor directory of <path> that looks like a
+# pre-Quadlet deployment tree (it has .deployed-commit, or scripts/deploy.sh and no
+# scripts/lib/quadlet-lib.sh). Prints nothing when there is none.
+npm_deploy_tree() {
+  local d=${1%/*}
+  while [[ -n $d && $d != / ]]; do
+    if [[ -f $d/.deployed-commit ]] || { [[ -f $d/scripts/deploy.sh && ! -f $d/scripts/lib/quadlet-lib.sh ]]; }; then
+      printf '%s\n' "$d"
+      return 0
+    fi
+    d=${d%/*}
+  done
+  return 0
+}
+
+# npm_deploy_tree_units: "<unit> <tree>" for every user .service/.timer whose Exec* program
+# lies inside such a tree. These are the units that keep a foreign deployment alive.
+npm_deploy_tree_units() {
+  local d=$HOME/.config/systemd/user f p tree
+  [[ -d $d ]] || return 0
+  for f in "$d"/*.service "$d"/*.timer; do
+    [[ -f $f ]] || continue
+    [[ ${f##*/} == "$NPM_UNIT" ]] && continue
+    while IFS= read -r p; do
+      tree=$(npm_deploy_tree "$p")
+      if [[ -n $tree ]]; then
+        printf '%s %s\n' "${f##*/}" "$tree"
+        break
+      fi
+    done < <(npm_exec_paths "$f")
+  done
+  return 0
+}
+
+# npm_network_peers <network>: the other containers attached to <network>, space separated.
+# Best effort: it is used to name what NPM proxies across a network the unit does not join,
+# so an empty answer only makes the refusal less specific, never wrong.
+npm_network_peers() {
+  podman ps --filter "network=$1" --format '{{.Names}}' 2>/dev/null \
+    | grep -vx "$NPM_CONTAINER" | tr '\n' ' ' | sed 's/ $//'
+  return 0
+}
+
+# npm_host_tree_check <legacy unit count> <networks>: refuse a migration whose live npm-app
+# does not match what this package's lineage assumes. Refusals, never warnings - both cases
+# leave a working NPM broken in a way that shows up hours later, at the next boot or the next
+# certificate renewal.
+npm_host_tree_check() {
+  local nunits=${1:?usage: npm_host_tree_check <legacy unit count> <networks>} nets=${2-}
+  local -a foreign=() extra=()
+  local u tree n peers lineage
+
+  lineage="this host's npm-app was deployed by a different lineage; migrate-legacy.sh only adopts the compose-era/hand-made shapes"
+
+  if ((nunits == 0)); then
+    while read -r u tree; do [[ -n $u ]] && foreign+=("$u ($tree)"); done < <(npm_deploy_tree_units)
+    if ((${#foreign[@]})); then
+      ql_die "$lineage. No unit was found that starts or stops npm-app, yet these user units run programs out of a pre-Quadlet deployment tree: ${foreign[*]}. Migrating now would leave them enabled: the next boot or timer tick re-runs that tree's scripts/deploy.sh and recreates npm-app against the Quadlet container's ports and volumes. Retire those units and their tree first (do NOT delete the tree - they execute scripts from it)"
+    fi
+  fi
+
+  for n in $nets; do
+    case " $NPM_OWN_NETWORKS " in
+      *" $n "*) continue ;;
+    esac
+    peers=$(npm_network_peers "$n")
+    extra+=("$n${peers:+ (NPM reaches ${peers} across it)}")
+  done
+  if ((${#extra[@]})); then
+    ql_die "$lineage. npm-app is attached to ${#extra[@]} network(s) the Quadlet unit does not join: ${extra[*]}. quadlet/npm-app.container joins npm.network only (plus pi-agent through fragments/pi-web-front.conf), so after the cutover NPM would lose DNS for every upstream on those networks - silently, because nginx resolves upstream names at config load. Add the network to quadlet/ (a fragment like fragments/pi-web-front.conf) before migrating this host"
+  fi
+  return 0
 }
 
 # npm_rendered_image <rendered npm-app.container>: its Image= value
