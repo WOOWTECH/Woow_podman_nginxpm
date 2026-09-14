@@ -45,8 +45,18 @@
 # shellcheck source-path=SCRIPTDIR
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+# Lineage guard, ahead of the library source on purpose: a host's pre-Quadlet deployment tree
+# (openclaw's ~/Woow_podman_nginxpm, a hand-copied non-git directory with the same name as
+# this repo) has no scripts/lib/quadlet-lib.sh, so sourcing first would die with a bare
+# "No such file or directory" instead of saying what is wrong. ql_require_own_lineage below
+# catches the trees that DO carry a lib copy.
+[[ -r $REPO/scripts/lib/quadlet-lib.sh ]] || {
+  printf '%s: ERROR: %s\n' "${0##*/}" "no scripts/lib/quadlet-lib.sh under $REPO: this is not a checkout of WOOWTECH/Woow_podman_nginxpm. If it has scripts/deploy.sh you are running this from the host's pre-Quadlet deployment tree, which is not this package's lineage and is not a git repo - run from a fresh clone, and do not delete that tree: three live systemd units execute scripts from it" >&2
+  exit 1
+}
 # shellcheck source=lib/quadlet-lib.sh
 . "$REPO/scripts/lib/quadlet-lib.sh"
+ql_require_own_lineage "$REPO" WOOWTECH/Woow_podman_nginxpm
 # shellcheck source=common.sh
 . "$REPO/scripts/common.sh"
 
@@ -187,6 +197,10 @@ if [[ $label == "$NPM_UNIT" ]]; then ql_info "npm-app is already managed by $NPM
 
 # 1. read the legacy container
 mapfile -t legacy_units < <({ [[ -n $label ]] && printf '%s\n' "$label"; npm_legacy_units; } | sort -u)
+# Does this host's npm-app have the shape this package adopts? Both mismatches below let the
+# old script run to completion and break NPM later, not now (see common.sh, "the host-tree
+# guard"), so they are refusals rather than warnings.
+npm_host_tree_check "${#legacy_units[@]}" "$(podman inspect --format "$NPM_FMT_NETWORKS" "$NPM_CONTAINER")"
 # The derivation and its templates live in common.sh; tests/inspect-templates.sh runs them
 # against a captured `podman inspect npm-app`.
 npm_ports_derive < <(podman inspect --format "$NPM_FMT_PORTS" "$NPM_CONTAINER")

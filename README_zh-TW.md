@@ -138,6 +138,23 @@ git pull
 
 它會讀舊容器（連接埠、網路、TZ、volume）與啟動它的 unit，據此寫出 `~/.config/npm/npm.env`，記錄基準檢查，備份（inspect、CreateCommand、unit 檔、compose 目錄），然後在一次短停機內：停止並停用舊 unit、冷匯出兩個 volume、把容器改名為 `npm-app-legacy-<date>`（Quadlet 的 `--replace` 會刪掉同名容器），再執行 `install.sh`。安裝失敗會自動回滾。過程不刪任何東西：觀察期結束後，再自行移除舊容器、舊 unit 檔與舊的 compose 網路。
 
+### 何時會拒絕：血統不同的主機
+
+`migrate-legacy.sh` 只接管兩種 `npm-app`：podman-compose 專案，以及手工的 `podman run`。
+遇到下列情況會**直接拒絕**（不是警告後繼續）：
+
+- **找不到任何啟停 `npm-app` 的 unit，但有 user unit 執行 pre-Quadlet 部署樹裡的程式**
+  （該目錄有 `.deployed-commit`，或有 `scripts/deploy.sh` 而沒有 `scripts/lib/quadlet-lib.sh`）。
+  拒絕訊息會列出那些 unit 與該目錄。硬遷移會讓它們仍然 enabled，下次開機或 timer 觸發時
+  會重跑該樹的 `deploy.sh`，與 Quadlet 容器搶同一組連接埠與 volume。
+- **`npm-app` 接在 Quadlet unit 不會加入的網路上。** unit 只加入 `npm.network`，以及透過
+  `quadlet/fragments/pi-web-front.conf` 加入的 `pi-agent`。第三個網路必須先加進 `quadlet/`：
+  nginx 在載入設定時解析 upstream 名稱，少一個網路要到下次 reload 才會爆，屬於無聲失敗。
+
+在那種目錄裡執行本套件的任何腳本都會被拒絕（`ql_require_own_lineage`）：請改用本 repo 的全新
+clone 執行，而且**不要刪除**主機上的那棵樹——有正在運作的 systemd unit 會執行裡面的腳本。
+以上行為由 `tests/host-tree.sh` 固定。
+
 ## 安全性
 
 - **管理介面永遠不會發佈到 LAN 介面。** 它綁在 `127.0.0.1:81`；請用 `ssh -L`、tailnet 的 `tailscale serve --tcp=81`，或一個掛了 access list 的 NPM proxy host 連進去。全新 volume 的預設帳密是 `admin@example.com` / `changeme`，第一次登入就要改掉。

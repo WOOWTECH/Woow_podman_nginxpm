@@ -244,6 +244,25 @@ admin users, access lists, certificates and JWT keys in `npm-app-data` and
 container; NPM does not need it.) The container id and the IP/MAC lease are not
 preserved either. `tests/rollback-model.sh` pins both paths.
 
+### When it refuses: a host of a different lineage
+
+`migrate-legacy.sh` adopts two shapes of `npm-app`: a podman-compose project, and a hand-made
+`podman run`. Some hosts run neither. It **refuses** (it does not warn and carry on) when:
+
+- **no unit that starts or stops `npm-app` was found, but a user unit runs a program out of a
+  pre-Quadlet deployment tree** (a directory with a `.deployed-commit` stamp, or `scripts/deploy.sh`
+  and no `scripts/lib/quadlet-lib.sh`). The refusal names those units and that tree. Migrating
+  anyway would leave them enabled, and the next boot or timer tick would re-run that tree's
+  `deploy.sh` and recreate `npm-app` against the Quadlet container's ports and volumes.
+- **`npm-app` is attached to a network the Quadlet unit does not join.** The unit joins
+  `npm.network`, plus `pi-agent` through `quadlet/fragments/pi-web-front.conf`. A third network has
+  to be added to `quadlet/` first: nginx resolves upstream names at config load, so losing one is
+  silent until the next reload.
+
+Running any script out of such a tree is refused outright (`ql_require_own_lineage`): run it from a
+fresh clone of this repo instead, and do **not** delete the host tree — live systemd units execute
+scripts from it. `tests/host-tree.sh` pins all of this.
+
 ## Security
 
 - **The admin UI is never published on a LAN interface.** It is bound to

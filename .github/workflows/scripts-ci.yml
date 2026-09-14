@@ -32,3 +32,9 @@ jobs:
 
       - name: Legacy rollback model (rename vs capture)
         run: tests/rollback-model.sh
+
+      # tests/host-tree.sh pins the guard that refuses a host whose npm-app was deployed by
+      # a different lineage (openclaw: nginx-proxy-manager.service out of a non-git deploy.sh
+      # tree, plus a third network the unit does not join). Own HOME, stubbed podman.
+      - name: Host-tree and lineage guards
+        run: tests/host-tree.sh
