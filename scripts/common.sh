@@ -20,14 +20,27 @@ NPM_VOLUMES=(npm-app-data npm-letsencrypt)
 # between "npm-app" and the "-" of "npm-app-legacy-20260915", so `\bnpm-app\b` matched the
 # RENAMED rollback copy (and any other npm-app-* container) as well - see tests/host-tree.sh,
 # which pins both the positive and the negative case.
+#
+# The argument between the verb and the name is OPTIONAL. An earlier anchoring wrote
+# `...(start|stop|run|restart)[[:space:]].*[[:space:]]npm-app(...)`, whose `.*[[:space:]]`
+# demanded a SECOND whitespace run after the verb - so the canonical
+# `ExecStart=/usr/bin/podman start npm-app` was NOT discovered, while
+# `ExecStop=/usr/bin/podman stop -t 10 npm-app` was. An undiscovered unit is never stopped
+# and never `systemctl --user disable`d by migrate-legacy.sh, and on a host where
+# podman-restart.service is enabled (woowtechopenclaw) it revives npm-app at the next boot
+# against the Quadlet-managed container. tests/host-tree.sh now pins one case per Exec form.
 npm_legacy_units() {
   local d=$HOME/.config/systemd/user f
   [[ -d $d ]] || return 0
+  # the name, optionally quoted, anchored on whitespace-or-end
+  local q='["'"'"']?'
+  local n="${q}npm-app${q}([[:space:]]|\$)"
+  local ex='^[[:space:]]*Exec(Start|StartPre|StartPost|Stop|StopPost|Reload)='
   for f in "$d"/*.service; do
     [[ -f $f ]] || continue
     [[ ${f##*/} == "$NPM_UNIT" ]] && continue
-    if grep -qE '^[[:space:]]*Exec(Start|StartPre|Stop)=.*[[:space:]](start|stop|run|restart)[[:space:]].*[[:space:]]npm-app([[:space:]]|$)' "$f" \
-      || grep -qE '^[[:space:]]*Exec(Start|Stop)=.*[[:space:]]--name[= ]npm-app([[:space:]]|$)' "$f"; then
+    if grep -qE "$ex.*[[:space:]](start|stop|run|restart|kill|rm|create)[[:space:]]+(.*[[:space:]])?$n" "$f" \
+      || grep -qE "$ex.*[[:space:]]--name[= ]$n" "$f"; then
       printf '%s\n' "${f##*/}"
     fi
   done

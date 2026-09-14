@@ -110,6 +110,63 @@ load() {
 }
 
 # ---- npm_legacy_units: the container name must not match npm-app-* ------------------------
+#
+# Each Exec form is pinned by its OWN case. A single case with several Exec lines is a no-op
+# control: the two-line compose unit below stayed green while its `podman start npm-app` line
+# was undiscovered, because the `stop -t 10` line still matched. A unit discovered by only one
+# of its lines is still discovered - the regression hides until a unit has ONLY that form.
+#
+# one_form <unit name> <single Exec line> <what it is> [expected output]
+one_form() {
+  HOME=$(mk_home)
+  export HOME
+  mk_unit "$HOME" "$1" "$2"
+  load
+  eq "$(npm_legacy_units)" "${4-$1}" "$3"
+}
+
+t_legacy_units_start_only() {
+  one_form container-npm-app.service \
+    'ExecStart=/usr/bin/podman start npm-app' 'podman start <name>'
+}
+
+t_legacy_units_stop_only() {
+  one_form container-npm-app.service \
+    'ExecStart=/usr/bin/podman stop npm-app' 'podman stop <name>'
+}
+
+t_legacy_units_stop_timeout() {
+  one_form container-npm-app.service \
+    'ExecStop=/usr/bin/podman stop -t 10 npm-app' 'podman stop -t N <name>'
+}
+
+t_legacy_units_restart_only() {
+  one_form npm-restart.service \
+    'ExecStart=/usr/bin/podman restart npm-app' 'podman restart <name>'
+}
+
+t_legacy_units_no_abspath() {
+  one_form npm-bare.service \
+    'ExecStart=podman start npm-app' 'podman without /usr/bin/'
+}
+
+t_legacy_units_quoted_name() {
+  one_form npm-quoted.service \
+    'ExecStart=/usr/bin/podman start "npm-app"' 'a double-quoted name'
+}
+
+t_legacy_units_single_quoted_name() {
+  one_form npm-sq.service \
+    "ExecStart=/usr/bin/podman stop 'npm-app'" 'a single-quoted name'
+}
+
+t_legacy_units_run_equals_name() {
+  one_form npm-run-eq.service \
+    'ExecStart=/usr/bin/podman run -d --name=npm-app docker.io/jc21/nginx-proxy-manager:2.15.1' \
+    '--name=<name>'
+}
+
+# the compose-era unit: both forms at once, still one line of output
 t_legacy_units_positive() {
   HOME=$(mk_home)
   export HOME
@@ -118,6 +175,19 @@ t_legacy_units_positive() {
 ExecStop=/usr/bin/podman stop -t 10 npm-app'
   load
   eq "$(npm_legacy_units)" "container-npm-app.service" "the compose-era unit"
+}
+
+# the negative, per form: a suffixed name must not be discovered by ANY of them
+t_legacy_units_start_only_suffixed() {
+  one_form npm-app-legacy.service \
+    'ExecStart=/usr/bin/podman start npm-app-legacy-20260915' \
+    'podman start npm-app-legacy-* must not be discovered' ''
+}
+
+t_legacy_units_quoted_suffixed() {
+  one_form npm-app-legacy.service \
+    'ExecStart=/usr/bin/podman start "npm-app-legacy-20260915"' \
+    'a quoted npm-app-legacy-* must not be discovered' ''
 }
 
 t_legacy_units_run_name() {
@@ -283,6 +353,16 @@ t_script_run_from_host_tree() {
   has "$out" "do not delete that tree" "the do-not-delete warning"
 }
 
+case_ legacy-units-start-only t_legacy_units_start_only
+case_ legacy-units-stop-only t_legacy_units_stop_only
+case_ legacy-units-stop-timeout t_legacy_units_stop_timeout
+case_ legacy-units-restart-only t_legacy_units_restart_only
+case_ legacy-units-no-abspath t_legacy_units_no_abspath
+case_ legacy-units-quoted-name t_legacy_units_quoted_name
+case_ legacy-units-single-quoted-name t_legacy_units_single_quoted_name
+case_ legacy-units-run-equals-name t_legacy_units_run_equals_name
+case_ legacy-units-start-only-suffixed t_legacy_units_start_only_suffixed
+case_ legacy-units-quoted-suffixed t_legacy_units_quoted_suffixed
 case_ legacy-units-positive t_legacy_units_positive
 case_ legacy-units-run-name t_legacy_units_run_name
 case_ legacy-units-rejects-suffixed-name t_legacy_units_rejects_suffixed_name
