@@ -316,6 +316,8 @@ scripts/
   install.sh upgrade.sh uninstall.sh backup.sh restore.sh migrate-legacy.sh
   common.sh render-args.sh
   lib/quadlet-lib.sh       vendored WOOWTECH Quadlet library (do not edit; CI checks its hash)
+  lib/quadlet-lib.versions vendored version ledger; tests/lib-version.sh proves the lib above
+                           really is the version it declares (CI)
 tests/
   dryrun.sh dryrun.local.sh   render + quadlet -dryrun + systemd-analyze verify (CI)
   inspect-templates.sh     what migrate-legacy.sh derives from a captured `podman inspect`
